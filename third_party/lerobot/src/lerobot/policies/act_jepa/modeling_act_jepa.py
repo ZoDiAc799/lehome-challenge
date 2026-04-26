@@ -254,16 +254,6 @@ class ACTJEPA(nn.Module):
             if self.config.image_features and OBS_IMAGES in act_batch:
                 act_batch[OBS_IMAGES] = [act_batch[key] for key in self.config.image_features]
 
-        # TODO: remove debug print after smoke test
-        if not hasattr(self, "_debug_printed"):
-            img_key = next(iter(self.config.image_features), None)
-            if img_key:
-                print(f"[ACT-JEPA debug] act_batch image shape: {act_batch[img_key].shape}")
-            print(f"[ACT-JEPA debug] act_batch state shape: {act_batch[OBS_STATE].shape}")
-            print(f"[ACT-JEPA debug] chunk_size: {self.config.chunk_size}")
-            print(f"[ACT-JEPA debug] jepa_prediction_horizon: {self.config.jepa_prediction_horizon}")
-            self._debug_printed = True
-
         # Run vanilla ACT forward (encoder + VAE + decoder)
         actions, (mu, log_sigma_x2) = self.act(act_batch)
 
