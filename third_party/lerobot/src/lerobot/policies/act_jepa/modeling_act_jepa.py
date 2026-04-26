@@ -60,14 +60,14 @@ class ACTJEPAPolicy(PreTrainedPolicy):
                 "params": [
                     p
                     for n, p in self.named_parameters()
-                    if not n.startswith("model.backbone") and not n.startswith("model.target_") and p.requires_grad
+                    if not n.startswith("model.act.backbone") and not n.startswith("model.target_") and p.requires_grad
                 ]
             },
             {
                 "params": [
                     p
                     for n, p in self.named_parameters()
-                    if n.startswith("model.backbone") and p.requires_grad
+                    if n.startswith("model.act.backbone") and p.requires_grad
                 ],
                 "lr": self.config.optimizer_lr_backbone,
             },
