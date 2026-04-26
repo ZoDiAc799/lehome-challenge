@@ -71,3 +71,6 @@ tests/
 
 # Docker history
 .isaac-lab-docker-history
+
+# Virtual environment
+.venv/
