@@ -222,29 +222,54 @@ class ACTJEPA(nn.Module):
         """
         # During training with delta_timestamps, observation.state has shape (B, T, state_dim)
         # where T = prediction_horizon. We use t=0 as the current observation for the encoder,
-        # and t=0:T as the target sequence for JEPA.
+        # and t=0:T as the target sequence for JEPA. The dataloader applies the same delta
+        # indices to ALL observation.* keys, so image streams and *_is_pad flags also arrive
+        # with an extra time dim and must be sliced down for the vanilla ACT branch.
         obs_state = batch.get(OBS_STATE)
         has_future_obs = obs_state is not None and obs_state.dim() == 3
 
         if has_future_obs:
-            # Split current vs future observations
-            current_obs_state = obs_state[:, 0]  # (B, state_dim)
             future_obs_states = obs_state  # (B, T, state_dim) — full sequence including t=0
+            future_obs_pad = batch.get(f"{OBS_STATE}_is_pad")  # (B, T) or None
         else:
-            current_obs_state = obs_state  # (B, state_dim) — inference or no delta_timestamps
             future_obs_states = None
+            future_obs_pad = None
 
-        # Build a batch with only current observation for the ACT encoder
+        # Build a sliced batch with only t=0 observations for the ACT encoder
         act_batch = dict(batch)
         if has_future_obs:
-            act_batch[OBS_STATE] = current_obs_state
+            act_batch[OBS_STATE] = obs_state[:, 0]  # (B, state_dim)
+            # Slice image streams: (B, T, C, H, W) -> (B, C, H, W)
+            for key in self.config.image_features:
+                tensor = act_batch.get(key)
+                if tensor is not None and tensor.dim() == 5:
+                    act_batch[key] = tensor[:, 0]
+            # Slice pad flags for state and image keys: (B, T) -> (B,)
+            pad_keys = [f"{OBS_STATE}_is_pad"] + [f"{k}_is_pad" for k in self.config.image_features]
+            for pk in pad_keys:
+                tensor = act_batch.get(pk)
+                if tensor is not None and tensor.dim() == 2:
+                    act_batch[pk] = tensor[:, 0]
+            # Rebuild OBS_IMAGES list from the sliced per-key tensors
+            if self.config.image_features and OBS_IMAGES in act_batch:
+                act_batch[OBS_IMAGES] = [act_batch[key] for key in self.config.image_features]
+
+        # TODO: remove debug print after smoke test
+        if not hasattr(self, "_debug_printed"):
+            img_key = next(iter(self.config.image_features), None)
+            if img_key:
+                print(f"[ACT-JEPA debug] act_batch image shape: {act_batch[img_key].shape}")
+            print(f"[ACT-JEPA debug] act_batch state shape: {act_batch[OBS_STATE].shape}")
+            print(f"[ACT-JEPA debug] chunk_size: {self.config.chunk_size}")
+            print(f"[ACT-JEPA debug] jepa_prediction_horizon: {self.config.jepa_prediction_horizon}")
+            self._debug_printed = True
 
         # Run vanilla ACT forward (encoder + VAE + decoder)
         actions, (mu, log_sigma_x2) = self.act(act_batch)
 
         # Compute JEPA loss if requested (training only)
         if compute_jepa and future_obs_states is not None:
-            jepa_loss = self._compute_jepa_loss(future_obs_states, batch)
+            jepa_loss = self._compute_jepa_loss(future_obs_states, act_batch, future_obs_pad)
         else:
             jepa_loss = torch.tensor(0.0, device=actions.device)
 
@@ -254,12 +279,15 @@ class ACTJEPA(nn.Module):
         self,
         future_obs_states: Tensor,
         batch: dict[str, Tensor],
+        future_obs_pad: Tensor | None = None,
     ) -> Tensor:
         """Compute the JEPA observation-prediction loss.
 
         Args:
             future_obs_states: (B, T, state_dim) future observation states
-            batch: full training batch (needed for re-running encoder to get encoder_out)
+            batch: sliced training batch (current-frame inputs only) for re-running the
+                online encoder. Image and state tensors must already be (B, ...) not (B, T, ...).
+            future_obs_pad: optional (B, T) padding mask for future observations.
 
         Returns:
             Scalar L1 loss between predicted and target latents.
@@ -298,9 +326,8 @@ class ACTJEPA(nn.Module):
 
         # ── L1 loss in latent space ──
         # Mask padding if observation padding info is available
-        obs_is_pad_key = f"{OBS_STATE}_is_pad"
-        if obs_is_pad_key in batch:
-            mask = ~batch[obs_is_pad_key]  # (B, T)
+        if future_obs_pad is not None:
+            mask = ~future_obs_pad  # (B, T)
             loss = (F.l1_loss(pred_latents, target_latents, reduction="none") * mask.unsqueeze(-1)).mean()
         else:
             loss = F.l1_loss(pred_latents, target_latents)
