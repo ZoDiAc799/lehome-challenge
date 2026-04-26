@@ -30,10 +30,11 @@ policy:
   jepa_ema_decay: 0.999
   jepa_loss_weight: 1.0
   jepa_predictor_n_layers: 1
+  jepa_prediction_horizon: 16
 
 output_dir: outputs/train/act_jepa_top_long
 batch_size: 16
-num_workers: 8
+num_workers: 4
 steps: 30000
 save_freq: 5000
 log_freq: 1000
