@@ -3,9 +3,9 @@ name = "lehome"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.11,<3.12"
+requires-python = ">=3.11"
 dependencies = [
-    "isaacsim[all,extscache]==5.1.0",
+    # "isaacsim[all,extscache]==5.1.0",  # Removed: not supported on Thunder Cloud
     "lerobot==0.4.3",
     "num2words>=0.5.14",
     "open3d>=0.19.0",
